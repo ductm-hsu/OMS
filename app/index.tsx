@@ -12,7 +12,6 @@ import {
   Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
-// Import file cấu hình supabase
 import { supabase } from '../src/utils/supabase'; 
 
 export default function LoginScreen() {
@@ -21,7 +20,6 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  // Hàm xử lý khi bấm nút Đăng nhập
   const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert('Lỗi', 'Vui lòng nhập đầy đủ Email và Mật khẩu.');
@@ -30,7 +28,6 @@ export default function LoginScreen() {
 
     setLoading(true);
     
-    // Gọi API của Supabase để xác thực
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
@@ -39,10 +36,20 @@ export default function LoginScreen() {
     if (error) {
       Alert.alert('Đăng nhập thất bại', error.message);
     } else {
-      // Nếu thành công, in ra log để kiểm tra và sau này sẽ chuyển hướng
-      console.log('User ID:', data.user.id);
+      const { data: userData, error: userError } = await supabase
+        .from('tb_users')
+        .select('role')
+        .eq('id', data.user.id)
+        .single(); 
+
+      if (userData) {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        await AsyncStorage.setItem('userRole', userData.role);
+        console.log('Đã lưu Role:', userData.role);
+      }
+
       Alert.alert('Thành công', 'Chào mừng bạn quay lại OMS!');
-      router.replace('/(tabs)');
+      router.replace('/(tabs)'); 
     }
     
     setLoading(false);
@@ -107,7 +114,7 @@ export default function LoginScreen() {
 // Phần CSS (StyleSheet)
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1, // Đổi từ flex: 1 thành flexGrow: 1 để ScrollView hoạt động chuẩn
+    flexGrow: 1, 
     backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     padding: 20,
