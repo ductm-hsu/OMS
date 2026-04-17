@@ -1,88 +1,113 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons'; 
 import { useEffect, useState } from 'react';
+// Sửa lỗi import AsyncStorage và đảm bảo tương thích với môi trường mobile
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
- * TabLayout: Cấu trúc các Tab phía dưới màn hình.
- * Sau khi bạn đổi tên file app/(tabs)/index.tsx thành home.tsx,
- * tên màn hình (name) ở đây phải chuyển thành "home" để khớp với router.
+ * Layout chính của hệ thống Tab (app/(tabs)/_layout.tsx)
+ * Quản lý phân quyền hiển thị Tab cho 3 vai trò: Customer, Shipper, Manager
  */
 export default function TabLayout() {
   const [role, setRole] = useState<string | null>(null);
 
-  // Lấy role từ bộ nhớ để kiểm tra quyền hiển thị Tab Đơn Hàng
   useEffect(() => {
     const fetchRole = async () => {
       try {
         const storedRole = await AsyncStorage.getItem('userRole');
         setRole(storedRole);
       } catch (e) {
-        console.error('Lỗi khi lấy role:', e);
+        console.error('Lỗi lấy role từ bộ nhớ:', e);
       }
     };
     fetchRole();
   }, []);
 
+  const isShipper = role === 'shipper';
+  const isManager = role === 'manager';
+
   return (
     <Tabs 
       screenOptions={{
-        tabBarActiveTintColor: '#0056b3',
-        tabBarInactiveTintColor: '#8e8e93',
+        tabBarActiveTintColor: '#1E40AF',
+        tabBarInactiveTintColor: '#94A3B8',
         headerShown: false,
         tabBarStyle: { 
           paddingBottom: 5, 
-          height: 60,
-          backgroundColor: '#ffffff',
+          height: 65,
           borderTopWidth: 1,
-          borderTopColor: '#f1f3f5'
+          borderTopColor: '#F1F5F9'
+        },
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '900',
+          textTransform: 'uppercase',
+          marginBottom: 4
         }
       }}
     >
-      {/* 1. Trang Chủ: Đã đổi tên name từ "index" thành "home" */}
-      {/* Route này sẽ ánh xạ tới file app/(tabs)/home.tsx */}
+      {/* 1. TRANG CHỦ (Dành cho Khách hàng & Manager) */}
       <Tabs.Screen
         name="home"
         options={{
-          title: 'Trang Chủ',
+          title: isManager ? 'Thống Kê' : 'Trang Chủ',
+          href: isShipper ? null : '/home', 
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
+            <Ionicons name={focused ? 'grid' : 'grid-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+
+      {/* 2. TRANG CHỦ SHIPPER (Chỉ hiển thị cho Shipper) */}
+      <Tabs.Screen
+        name="shipper-home"
+        options={{
+          title: 'Trang Chủ',
+          href: isShipper ? '/shipper-home' : null,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+
+      {/* 3. VẬN HÀNH (Chỉ hiển thị cho Shipper) */}
+      <Tabs.Screen
+        name="shipper-tasks"
+        options={{
+          title: 'Vận Hành',
+          href: isShipper ? '/shipper-tasks' : null,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'bicycle' : 'bicycle-outline'} size={24} color={color} />
           ),
         }}
       />
       
-      {/* 2. Đơn Hàng: Chỉ hiển thị cho khách hàng */}
+      {/* 4. ĐƠN HÀNG (Hiển thị cho Khách và Manager) */}
+      {/* Đối với Manager, tab này sẽ đổi tên thành "Hệ Thống" để quản lý toàn bộ đơn */}
       <Tabs.Screen
         name="orders"
         options={{
-          title: 'Đơn Hàng',
-          // href: null giúp ẩn nút này khỏi thanh menu nếu không có quyền truy cập
-          href: (role === 'customer' ? '/orders' : null) as any,
+          title: isManager ? 'Hệ Thống' : 'Đơn Gửi',
+          href: !isShipper ? '/orders' : null,
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'cube' : 'cube-outline'} size={24} color={color} />
+            <Ionicons name={focused ? 'cube' : 'cube-outline'} size={22} color={color} />
           ),
         }}
       />
 
-      {/* 3. Cá Nhân */}
+      {/* 5. TÀI KHOẢN (Hiển thị cho tất cả các vai trò) */}
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Cá Nhân',
+          title: 'Tài Khoản',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'person' : 'person-outline'} size={24} color={color} />
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={22} color={color} />
           ),
         }}
       />
 
-      {/* Vô hiệu hóa route index trong nhóm tabs để tránh lỗi Unmatched Route */}
-      {/* Vì trang chủ thực sự hiện tại nằm ở file gốc app/index.tsx (Trang Login) */}
-      <Tabs.Screen
-        name="index"
-        options={{
-          href: null,
-        }}
-      />
+      {/* Vô hiệu hóa route index mặc định để tránh nhầm lẫn */}
+      <Tabs.Screen name="index" options={{ href: null }} />
     </Tabs>
   );
 }
