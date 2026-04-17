@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { 
   StyleSheet, 
   Text, 
@@ -10,51 +10,63 @@ import {
   Alert, 
   SafeAreaView, 
   Platform,
-  Dimensions
+  Dimensions,
+  LayoutAnimation
 } from 'react-native';
-// Sử dụng chuẩn thư viện di động cho dự án Expo
 import { 
   Ionicons, 
   MaterialCommunityIcons 
 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-// Đảm bảo đường dẫn tới tệp cấu hình Supabase chính xác
+// Import tệp cấu hình Supabase
 import { supabase } from '../../src/utils/supabase';
 
 const { width } = Dimensions.get('window');
 
 /**
- * Màn hình Đối soát COD (Dành cho Quản lý)
- * Chức năng: Chốt tiền thu hộ từ Shipper và xác nhận đã thanh toán cho Shop (Người gửi).
- * Quy trình: Chuyển financial_status từ 'collected' sang 'paid'.
+ * Interface cho dữ liệu đơn hàng đã gom nhóm
  */
-export default function ReconciliationScreen() {
+interface GroupedOrder {
+  shopId: string;
+  shopName: string;
+  shopPhone: string;
+  orders: any[];
+  totalCod: number;
+}
+
+/**
+ * Màn hình Đối soát COD dành cho Manager
+ * Gom nhóm đơn hàng theo từng Shop để quản lý dòng tiền tập trung.
+ * Hỗ trợ chọn tất cả hoặc chọn lẻ từng đơn hàng để đối soát hàng loạt.
+ */
+export default function App() {
   const router = useRouter();
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [processing, setProcessing] = useState(false);
+  const [expandedShops, setExpandedShops] = useState<string[]>([]);
 
-  // 1. Tải danh sách đơn hàng đang chờ đối soát tài chính
-  const fetchPendingReconciliation = useCallback(async () => {
+  // 1. Tải danh sách đơn hàng đã được bưu tá thu tiền (collected)
+  const fetchData = useCallback(async () => {
     try {
       if (!refreshing) setLoading(true);
-      
-      // Lấy các đơn hàng có trạng thái tài chính là 'collected' (Bưu tá đã thu tiền)
       const { data, error } = await supabase
         .from('tb_orders')
         .select(`
           *,
-          shop:user_id (full_name, phone_number),
-          shipper:shipper_id (full_name, phone_number)
+          shop:user_id (id, full_name, phone_number),
+          shipper:shipper_id (full_name)
         `)
         .eq('financial_status', 'collected')
         .order('created_at', { ascending: true });
 
       if (error) throw error;
       setOrders(data || []);
+      setSelectedIds([]); // Reset lựa chọn khi tải mới dữ liệu
     } catch (error: any) {
-      console.error('Lỗi tải dữ liệu đối soát:', error.message);
+      console.error('Lỗi tải dữ liệu:', error.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -62,51 +74,96 @@ export default function ReconciliationScreen() {
   }, [refreshing]);
 
   useEffect(() => {
-    fetchPendingReconciliation();
-  }, [fetchPendingReconciliation]);
+    fetchData();
+  }, [fetchData]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchPendingReconciliation();
+  // 2. Logic gom nhóm dữ liệu theo từng Shop để hiển thị
+  const groupedData = useMemo(() => {
+    const groups: { [key: string]: GroupedOrder } = {};
+    orders.forEach(order => {
+      const shopId = order.shop?.id || 'unknown';
+      if (!groups[shopId]) {
+        groups[shopId] = {
+          shopId,
+          shopName: order.shop?.full_name || 'Shop ẩn danh',
+          shopPhone: order.shop?.phone_number || '',
+          orders: [],
+          totalCod: 0
+        };
+      }
+      groups[shopId].orders.push(order);
+      groups[shopId].totalCod += Number(order.cod_amount) || 0;
+    });
+    return Object.values(groups);
+  }, [orders]);
+
+  // 3. Xử lý logic chọn đơn hàng
+  const toggleSelectOrder = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
   };
 
-  // 2. Logic: Xác nhận đối soát và thanh toán tiền về cho Shop
-  const handleConfirmReconciliation = (orderId: string, amount: number) => {
+  const toggleSelectShop = (shopId: string, shopOrders: any[]) => {
+    const shopOrderIds = shopOrders.map(o => o.id);
+    const allSelectedInShop = shopOrderIds.every(id => selectedIds.includes(id));
+
+    if (allSelectedInShop) {
+      // Bỏ chọn toàn bộ đơn của Shop này
+      setSelectedIds(prev => prev.filter(id => !shopOrderIds.includes(id)));
+    } else {
+      // Chọn toàn bộ đơn của Shop này (không trùng lặp)
+      setSelectedIds(prev => [...new Set([...prev, ...shopOrderIds])]);
+    }
+  };
+
+  const toggleExpand = (shopId: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedShops(prev => 
+      prev.includes(shopId) ? prev.filter(s => s !== shopId) : [...prev, shopId]
+    );
+  };
+
+  // 4. Thực hiện đối soát hàng loạt các đơn đã chọn
+  const handleBatchReconcile = async () => {
+    if (selectedIds.length === 0) return;
+
     Alert.alert(
-      'Xác nhận thanh toán',
-      `Xác nhận bưu tá đã nộp đủ tiền mặt và hệ thống đã chuyển khoản ${amount.toLocaleString()}đ cho chủ shop?`,
+      'Xác nhận đối soát',
+      `Bạn chắc chắn muốn chốt đối soát tài chính cho ${selectedIds.length} đơn hàng đã chọn?`,
       [
-        { text: 'Hủy', style: 'cancel' },
+        { text: 'Quay lại', style: 'cancel' },
         { 
-          text: 'Xác nhận Xong', 
+          text: 'Xác nhận hoàn tất', 
           onPress: async () => {
             try {
-              setProcessingId(orderId);
-              
-              // 2.1 Cập nhật trạng thái tài chính của đơn hàng
-              const { error: updateError } = await supabase
+              setProcessing(true);
+              const { data: authData } = await supabase.auth.getUser();
+
+              // Cập nhật trạng thái 'paid' cho tất cả đơn đã chọn
+              const { error } = await supabase
                 .from('tb_orders')
                 .update({ financial_status: 'paid' })
-                .eq('id', orderId);
+                .in('id', selectedIds);
 
-              if (updateError) throw updateError;
+              if (error) throw error;
 
-              // 2.2 Ghi lại lịch sử hành trình đối soát (Audit Log)
-              const { data: authData } = await supabase.auth.getUser();
-              await supabase.from('tb_order_tracking').insert([{
-                order_id: orderId,
-                status: 'DELIVERED', // Vận chuyển đã xong, đây là bước chốt tiền
-                note: `QUẢN TRỊ: Đã hoàn tất đối soát COD. Tiền đã được trả cho Shop.`,
+              // Ghi log hành trình cho từng đơn hàng (Batch insert)
+              const trackingLogs = selectedIds.map(id => ({
+                order_id: id,
+                status: 'DELIVERED',
+                note: `MANAGER: Đối soát thành công. Tiền đã được trả về ví cho Shop.`,
                 updated_by: authData?.user?.id
-              }]);
+              }));
+              
+              await supabase.from('tb_order_tracking').insert(trackingLogs);
 
-              // Cập nhật giao diện tại chỗ
-              setOrders(prev => prev.filter(o => o.id !== orderId));
-              Alert.alert('Thành công', 'Đơn hàng đã được chốt sổ tài chính.');
+              Alert.alert('Thành công', `Đã hoàn thành đối soát ${selectedIds.length} đơn.`);
+              fetchData();
             } catch (e: any) {
-              Alert.alert('Lỗi', 'Không thể cập nhật đối soát đơn hàng.');
+              Alert.alert('Lỗi', 'Không thể thực hiện đối soát hàng loạt.');
             } finally {
-              setProcessingId(null);
+              setProcessing(false);
             }
           }
         }
@@ -114,97 +171,116 @@ export default function ReconciliationScreen() {
     );
   };
 
-  // Tính tổng tiền đang nằm trong ví "chờ chốt"
-  const totalCodAmount = orders.reduce((sum, item) => sum + (Number(item.cod_amount) || 0), 0);
+  const renderShopGroup = ({ item }: { item: GroupedOrder }) => {
+    const isExpanded = expandedShops.includes(item.shopId);
+    const shopOrderIds = item.orders.map(o => o.id);
+    const isAllSelected = shopOrderIds.every(id => selectedIds.includes(id));
+    const selectedInShopCount = item.orders.filter(o => selectedIds.includes(o.id)).length;
 
-  const renderItem = ({ item }: { item: any }) => (
-    <View style={styles.orderCard}>
-      <View style={styles.cardHeader}>
-        <View style={styles.shopInfo}>
-          <Ionicons name="storefront" size={16} color="#4F46E5" />
-          <Text style={styles.shopName} numberOfLines={1}>{item.shop?.full_name || 'Khách hàng ẩn danh'}</Text>
-        </View>
-        <Text style={styles.orderIdText}>#{item.id.slice(0, 8).toUpperCase()}</Text>
-      </View>
+    return (
+      <View style={styles.shopGroupCard}>
+        {/* Header hiển thị thông tin Shop và Checkbox tổng */}
+        <View style={styles.shopHeader}>
+          <TouchableOpacity 
+            style={styles.checkboxTouch} 
+            onPress={() => toggleSelectShop(item.shopId, item.orders)}
+          >
+            <Ionicons 
+              name={isAllSelected ? "checkbox" : (selectedInShopCount > 0 ? "remove-circle" : "square-outline")} 
+              size={26} 
+              color={selectedInShopCount > 0 ? "#4F46E5" : "#CBD5E0"} 
+            />
+          </TouchableOpacity>
 
-      <View style={styles.cardBody}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Khách nhận:</Text>
-          <Text style={styles.detailValue}>{item.receiver_name}</Text>
+          <TouchableOpacity style={styles.shopInfoSection} onPress={() => toggleExpand(item.shopId)}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.shopNameText}>{item.shopName}</Text>
+              <Text style={styles.shopStatsText}>
+                {item.orders.length} đơn • <Text style={{color: '#059669', fontWeight: '800'}}>{item.totalCod.toLocaleString()}đ</Text>
+              </Text>
+            </View>
+            <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color="#94A3B8" />
+          </TouchableOpacity>
         </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Shipper giao:</Text>
-          <Text style={[styles.detailValue, { color: '#0369A1' }]}>{item.shipper?.full_name || 'Chưa rõ'}</Text>
-        </View>
-        
-        <View style={styles.moneyGrid}>
-          <View style={styles.moneyBox}>
-            <Text style={styles.moneyLabel}>TIỀN COD</Text>
-            <Text style={styles.codValue}>{Number(item.cod_amount).toLocaleString()}đ</Text>
+
+        {/* Danh sách các đơn hàng chi tiết khi mở rộng */}
+        {isExpanded && (
+          <View style={styles.orderListContainer}>
+            {item.orders.map((order) => (
+              <TouchableOpacity 
+                key={order.id} 
+                style={styles.orderRow}
+                onPress={() => toggleSelectOrder(order.id)}
+              >
+                <Ionicons 
+                  name={selectedIds.includes(order.id) ? "checkbox" : "square-outline"} 
+                  size={22} 
+                  color={selectedIds.includes(order.id) ? "#4F46E5" : "#CBD5E0"} 
+                />
+                <View style={styles.orderDetailTextContainer}>
+                  <Text style={styles.orderIdText}>#{order.id.slice(0, 8).toUpperCase()}</Text>
+                  <Text style={styles.orderSubInfoText}>{order.receiver_name} • {order.shipper?.full_name || 'Shipper'}</Text>
+                </View>
+                <Text style={styles.orderAmountText}>{Number(order.cod_amount).toLocaleString()}đ</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-          <View style={styles.moneyBox}>
-            <Text style={styles.moneyLabel}>PHÍ SHIP</Text>
-            <Text style={styles.feeValue}>{Number(item.shipping_fee).toLocaleString()}đ</Text>
-          </View>
-        </View>
-      </View>
-
-      <TouchableOpacity 
-        style={[styles.confirmBtn, processingId === item.id && { opacity: 0.7 }]}
-        onPress={() => handleConfirmReconciliation(item.id, item.cod_amount)}
-        disabled={!!processingId}
-      >
-        {processingId === item.id ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <>
-            <Ionicons name="shield-checkmark" size={18} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.confirmBtnText}>XÁC NHẬN ĐÃ TRẢ TIỀN</Text>
-          </>
         )}
-      </TouchableOpacity>
-    </View>
-  );
+      </View>
+    );
+  };
+
+  const totalSelectedCod = orders
+    .filter(o => selectedIds.includes(o.id))
+    .reduce((sum, o) => sum + (Number(o.cod_amount) || 0), 0);
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* Header điều hướng */}
+      {/* Header màn hình */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
         <View style={styles.headerTitleBox}>
-          <Text style={styles.headerTitle}>Đối Soát Tiền COD</Text>
-          <Text style={styles.headerSubtitle}>Quản lý dòng tiền hệ thống</Text>
+          <Text style={styles.headerTitle}>Đối Soát Gom Nhóm</Text>
+          <Text style={styles.headerSubtitle}>Theo dõi dòng tiền theo khách hàng</Text>
         </View>
       </View>
 
-      {/* Thẻ tóm tắt dòng tiền */}
-      <View style={styles.summaryCard}>
-        <View>
-          <Text style={styles.summaryLabel}>Tiền COD Shipper đang cầm</Text>
-          <Text style={styles.summaryValue}>{totalCodAmount.toLocaleString()}đ</Text>
-        </View>
-        <View style={styles.summaryBadge}>
-          <Text style={styles.summaryCount}>{orders.length} Đơn</Text>
-        </View>
-        <MaterialCommunityIcons name="finance" size={80} color="rgba(255,255,255,0.1)" style={styles.bgIcon} />
-      </View>
-
-      {/* Danh sách các đơn chờ xử lý */}
       <FlatList
-        data={orders}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
+        data={groupedData}
+        renderItem={renderShopGroup}
+        keyExtractor={(item) => item.shopId}
         contentContainerStyle={styles.listContainer}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#059669']} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchData} colors={['#4F46E5']} />}
         ListEmptyComponent={!loading ? (
-          <View style={styles.emptyBox}>
-            <Ionicons name="checkmark-circle-outline" size={70} color="#D1D5DB" />
-            <Text style={styles.emptyText}>Hiện tại không còn đơn hàng nào cần đối soát.</Text>
+          <View style={styles.emptyContainer}>
+            <Ionicons name="shield-checkmark" size={80} color="#E2E8F0" />
+            <Text style={styles.emptyText}>Hiện chưa có đơn hàng nào cần đối soát tài chính.</Text>
           </View>
-        ) : null}
+        ) : <ActivityIndicator size="large" color="#4F46E5" style={{marginTop: 50}} />}
       />
+
+      {/* Action Footer Bar - Hiển thị khi có ít nhất 1 đơn được chọn */}
+      {selectedIds.length > 0 && (
+        <View style={styles.actionFooter}>
+          <View style={styles.footerInfoBox}>
+            <Text style={styles.selectedCountLabel}>Đã chọn {selectedIds.length} đơn hàng</Text>
+            <Text style={styles.totalAmountValue}>{totalSelectedCod.toLocaleString()}đ</Text>
+          </View>
+          <TouchableOpacity 
+            style={[styles.batchSubmitBtn, processing && { opacity: 0.6 }]} 
+            onPress={handleBatchReconcile}
+            disabled={processing}
+          >
+            {processing ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.batchBtnText}>ĐỐI SOÁT NGAY</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -225,81 +301,79 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: '900', color: '#111827' },
   headerSubtitle: { fontSize: 12, color: '#94A3B8', fontWeight: '600' },
 
-  summaryCard: {
-    margin: 16,
-    backgroundColor: '#059669',
-    borderRadius: 28,
-    padding: 24,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#059669',
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    position: 'relative',
-    overflow: 'hidden'
-  },
-  summaryLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '800', marginBottom: 4 },
-  summaryValue: { color: '#fff', fontSize: 30, fontWeight: '900' },
-  summaryBadge: { backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
-  summaryCount: { color: '#fff', fontWeight: '900', fontSize: 14 },
-  bgIcon: { position: 'absolute', right: -10, bottom: -10 },
-
-  listContainer: { padding: 16, paddingBottom: 40 },
-  orderCard: { 
+  listContainer: { padding: 16, paddingBottom: 110 },
+  
+  shopGroupCard: { 
     backgroundColor: '#fff', 
     borderRadius: 24, 
-    padding: 20, 
     marginBottom: 16, 
-    borderWidth: 1, 
+    overflow: 'hidden',
+    borderWidth: 1,
     borderColor: '#F1F5F9',
     elevation: 3,
     shadowColor: '#000',
-    shadowOpacity: 0.03
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 }
   },
-  cardHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 16,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8FAFC'
-  },
-  shopInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  shopName: { fontSize: 15, fontWeight: '800', color: '#1E293B', marginLeft: 8 },
-  orderIdText: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 0.5 },
-  
-  cardBody: { marginBottom: 20 },
-  detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  detailLabel: { fontSize: 13, color: '#64748B', fontWeight: '600' },
-  detailValue: { fontSize: 13, color: '#1E293B', fontWeight: '800' },
-  
-  moneyGrid: { 
-    flexDirection: 'row', 
-    backgroundColor: '#F8FAFC', 
-    padding: 16, 
-    borderRadius: 18, 
-    marginTop: 12 
-  },
-  moneyBox: { flex: 1 },
-  moneyLabel: { fontSize: 9, fontWeight: '900', color: '#94A3B8', marginBottom: 6 },
-  codValue: { fontSize: 18, fontWeight: '900', color: '#059669' },
-  feeValue: { fontSize: 18, fontWeight: '800', color: '#475569' },
-  
-  confirmBtn: { 
-    backgroundColor: '#4F46E5', 
+  shopHeader: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    justifyContent: 'center', 
-    padding: 16, 
-    borderRadius: 16,
-    elevation: 2
+    padding: 20, 
+    backgroundColor: '#fff' 
   },
-  confirmBtnText: { color: '#fff', fontWeight: '900', fontSize: 14, letterSpacing: 0.5 },
+  checkboxTouch: { padding: 4, marginRight: 14 },
+  shopInfoSection: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  shopNameText: { fontSize: 17, fontWeight: '800', color: '#1E293B' },
+  shopStatsText: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '600' },
 
-  emptyBox: { alignItems: 'center', marginTop: 80, paddingHorizontal: 50 },
-  emptyText: { textAlign: 'center', marginTop: 20, color: '#94A3B8', fontSize: 15, fontWeight: '600', lineHeight: 22 }
+  orderListContainer: { 
+    backgroundColor: '#F9FAFB', 
+    borderTopWidth: 1, 
+    borderTopColor: '#F1F5F9',
+    paddingHorizontal: 20,
+    paddingBottom: 10
+  },
+  orderRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 16, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#F1F5F9' 
+  },
+  orderDetailTextContainer: { flex: 1, marginLeft: 16 },
+  orderIdText: { fontSize: 14, fontWeight: '700', color: '#4F46E5' },
+  orderSubInfoText: { fontSize: 11, color: '#94A3B8', marginTop: 4, fontWeight: '700' },
+  orderAmountText: { fontSize: 15, fontWeight: '900', color: '#1E293B' },
+
+  actionFooter: { 
+    position: 'absolute', 
+    bottom: 24, 
+    left: 20, 
+    right: 20, 
+    backgroundColor: '#111827', 
+    borderRadius: 28, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    padding: 18,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 8 }
+  },
+  footerInfoBox: { flex: 1 },
+  selectedCountLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  totalAmountValue: { color: '#fff', fontSize: 20, fontWeight: '900', marginTop: 4 },
+  batchSubmitBtn: { 
+    backgroundColor: '#4F46E5', 
+    paddingHorizontal: 22, 
+    paddingVertical: 14, 
+    borderRadius: 18,
+    elevation: 4
+  },
+  batchBtnText: { color: '#fff', fontWeight: '900', fontSize: 13, letterSpacing: 0.5 },
+
+  emptyContainer: { alignItems: 'center', marginTop: 120, paddingHorizontal: 50 },
+  emptyText: { textAlign: 'center', marginTop: 24, color: '#94A3B8', fontSize: 16, fontWeight: '600', lineHeight: 24 }
 });
