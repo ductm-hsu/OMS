@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -13,24 +13,31 @@ import {
   Platform,
   KeyboardAvoidingView
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-// Sử dụng SafeAreaView từ thư viện chuẩn để tối ưu hiển thị trên các thiết bị di động
 import { SafeAreaView } from 'react-native-safe-area-context';
 /**
- * SỬA LỖI: Đảm bảo đường dẫn import supabase chính xác với cấu trúc:
- * app/addresses/add.tsx -> ../../ -> gốc -> src/utils/supabase
+ * Đảm bảo đường dẫn import supabase chính xác:
+ * Tệp hiện tại: app/addresses/add.tsx
+ * Đường dẫn: nhảy ra 2 cấp (../../) để về gốc, sau đó vào src/utils/supabase
  */
 import { supabase } from '../../src/utils/supabase';
 
 /**
- * Màn hình Thêm Kho Hàng Mới
- * Đã sửa lỗi: Bổ sung KeyboardAvoidingView để không bị che khuất bởi bàn phím
- * Đã sửa lỗi: Xử lý kiểu dữ liệu cho ListEmptyComponent
+ * MÀN HÌNH THÊM / SỬA KHO HÀNG (app/addresses/add.tsx)
+ * - Tự động phát hiện chế độ "Sửa" nếu có tham số 'id' trong URL.
+ * - Sử dụng giao diện Navy hiện đại đồng bộ với hệ thống OMS.
  */
-export default function AddAddressScreen() {
+export default function App() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  
+  // Lấy ID từ params để xác định chế độ Thêm mới hay Chỉnh sửa
+  const id = params?.id;
+  const isEditing = !!id;
+
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(isEditing);
 
   // States dữ liệu form
   const [contactName, setContactName] = useState('');
@@ -48,17 +55,28 @@ export default function AddAddressScreen() {
   const [modalType, setModalType] = useState<'province' | 'ward'>('province');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Khởi tạo dữ liệu khi màn hình mount
   useEffect(() => {
-    fetchProvinces();
-  }, []);
+    const initData = async () => {
+      await fetchProvinces();
+
+      if (id) {
+        await fetchCurrentAddress(id.toString());
+      } else {
+        setFetching(false);
+      }
+    };
+    
+    initData();
+  }, [id]);
 
   const fetchProvinces = async () => {
     try {
       const { data, error } = await supabase.from('tb_provinces').select('*').order('name');
       if (error) throw error;
       if (data) setProvinces(data);
-    } catch (e: any) {
-      console.error("Lỗi tải tỉnh thành:", e.message);
+    } catch (e: any) { 
+      console.error('Lỗi khi tải danh sách tỉnh thành:', e.message); 
     }
   };
 
@@ -67,8 +85,40 @@ export default function AddAddressScreen() {
       const { data, error } = await supabase.from('tb_wards').select('*').eq('province_id', pId).order('name');
       if (error) throw error;
       if (data) setWards(data);
+    } catch (e: any) { 
+      console.error('Lỗi khi tải danh sách phường xã:', e.message); 
+    }
+  };
+
+  // Tải dữ liệu chi tiết của kho hàng cũ để chỉnh sửa
+  const fetchCurrentAddress = async (addressId: string) => {
+    try {
+      setFetching(true);
+      const { data, error } = await supabase
+        .from('tb_addresses')
+        .select('*')
+        .eq('id', addressId)
+        .maybeSingle();
+      
+      if (error) throw error;
+      
+      if (data) {
+        setContactName(data.contact_name || '');
+        setContactPhone(data.contact_phone || '');
+        setProvinceId(data.province_id);
+        setWardId(data.ward_id);
+        setAddressDetail(data.address_detail || '');
+        
+        if (data.province_id) {
+          await fetchWards(data.province_id);
+        }
+      } else {
+        Alert.alert("Thông báo", "Không tìm thấy thông tin kho hàng.");
+      }
     } catch (e: any) {
-      console.error("Lỗi tải phường xã:", e.message);
+      Alert.alert("Lỗi", "Không thể tải dữ liệu kho hàng: " + e.message);
+    } finally {
+      setFetching(false);
     }
   };
 
@@ -80,23 +130,9 @@ export default function AddAddressScreen() {
     setSearchQuery('');
   };
 
-  const nonAccentVietnamese = (str: string) => {
-    if (!str) return "";
-    return str
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/đ/g, "d")
-        .replace(/Đ/g, "D")
-        .toLowerCase();
-  };
-
-  const filteredData = (modalType === 'province' ? provinces : wards).filter(item => {
-    return nonAccentVietnamese(item.name).includes(nonAccentVietnamese(searchQuery));
-  });
-
   const handleSave = async () => {
     if (!contactName || !contactPhone || !provinceId || !wardId || !addressDetail) {
-      Alert.alert('Thiếu thông tin', 'Vui lòng nhập đầy đủ các trường có dấu (*).');
+      Alert.alert('Thiếu thông tin', 'Vui lòng điền đầy đủ các trường bắt buộc (*).');
       return;
     }
 
@@ -105,31 +141,53 @@ export default function AddAddressScreen() {
       const { data: authData } = await supabase.auth.getUser();
       if (!authData?.user) throw new Error("Phiên đăng nhập hết hạn.");
 
-      const { error } = await supabase.from('tb_addresses').insert([{
+      const payload = {
         user_id: authData.user.id,
         contact_name: contactName,
         contact_phone: contactPhone,
         province_id: provinceId,
         ward_id: wardId,
-        address_detail: addressDetail,
-        is_default: false // Mặc định không phải kho chính, người dùng có thể đổi sau
-      }]);
+        address_detail: addressDetail
+      };
 
-      if (error) throw error;
+      if (isEditing && id) {
+        // CẬP NHẬT ĐỊA CHỈ HIỆN TẠI
+        const { error } = await supabase
+          .from('tb_addresses')
+          .update(payload)
+          .eq('id', id.toString());
+        if (error) throw error;
+        Alert.alert("Thành công", "Đã cập nhật thông tin kho hàng.");
+      } else {
+        // THÊM MỚI ĐỊA CHỈ
+        const { error } = await supabase
+          .from('tb_addresses')
+          .insert([payload]);
+        if (error) throw error;
+        Alert.alert("Thành công", "Đã thêm kho hàng mới.");
+      }
       
-      Alert.alert('Thành công', 'Kho hàng mới đã được lưu vào hệ thống.');
       router.back();
     } catch (e: any) {
-      Alert.alert('Lỗi', 'Không thể lưu kho hàng: ' + e.message);
+      Alert.alert('Lỗi', 'Không thể lưu dữ liệu: ' + e.message);
     } finally {
       setLoading(false);
     }
   };
 
+  if (fetching) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#1E40AF" />
+        <Text style={{ marginTop: 12, color: '#64748B', fontWeight: '600' }}>Đang tải thông tin kho...</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={{ flex: 1 }}
       >
         <ScrollView contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={false}>
@@ -137,7 +195,7 @@ export default function AddAddressScreen() {
             <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
               <Ionicons name="arrow-back" size={26} color="#1E40AF" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Thêm Kho Mới</Text>
+            <Text style={styles.headerTitle}>{isEditing ? "Sửa Kho Hàng" : "Thêm Kho Mới"}</Text>
           </View>
 
           <View style={styles.card}>
@@ -195,42 +253,34 @@ export default function AddAddressScreen() {
             onPress={handleSave} 
             disabled={loading}
           >
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>LƯU KHO HÀNG</Text>}
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.saveText}>{isEditing ? "CẬP NHẬT THÔNG TIN" : "LƯU KHO HÀNG"}</Text>
+            )}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Modal Tìm kiếm Tỉnh/Thành & Phường/Xã */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      {/* Modal tìm kiếm danh mục hành chính */}
+      <Modal visible={modalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <View style={styles.searchBarContainer}>
-                <Ionicons name="search" size={20} color="#94A3B8" />
-                <TextInput 
-                  style={styles.modalSearchInput} 
-                  placeholder="Nhập từ khóa tìm kiếm..." 
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  autoFocus
-                />
-              </View>
+              <TextInput 
+                style={styles.modalSearchInput} 
+                placeholder="Nhập từ khóa tìm kiếm..." 
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoFocus
+              />
               <TouchableOpacity onPress={() => { setModalVisible(false); setSearchQuery(''); }}>
                 <Ionicons name="close-circle" size={32} color="#EF4444" />
               </TouchableOpacity>
             </View>
             <FlatList
-              data={filteredData}
+              data={(modalType === 'province' ? provinces : wards).filter(item => (item.name||'').toLowerCase().includes(searchQuery.toLowerCase()))}
               keyExtractor={(item) => item.id.toString()}
-              contentContainerStyle={{ paddingBottom: 40 }}
-              /**
-               * SỬA LỖI: Trả về null thay vì false khi danh sách trống hoặc đang xử lý
-               */
-              ListEmptyComponent={searchQuery !== '' ? (
-                <View style={{ alignItems: 'center', marginTop: 40 }}>
-                  <Text style={{ color: '#94A3B8', fontWeight: '500' }}>Không tìm thấy kết quả.</Text>
-                </View>
-              ) : null}
               renderItem={({ item }) => (
                 <TouchableOpacity 
                   style={styles.itemRow} 
@@ -250,14 +300,14 @@ export default function AddAddressScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC' },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 25, marginTop: 10 },
   backBtn: { padding: 4, marginRight: 10 },
   headerTitle: { fontSize: 22, fontWeight: '900', color: '#1E40AF' },
-  
   card: { 
     backgroundColor: '#fff', 
-    borderRadius: 20, 
-    padding: 18, 
+    borderRadius: 24, 
+    padding: 20, 
     elevation: 4, 
     shadowColor: '#000', 
     shadowOpacity: 0.05, 
@@ -271,9 +321,9 @@ const styles = StyleSheet.create({
     borderRadius: 14, 
     borderWidth: 1, 
     borderColor: '#E2E8F0', 
-    fontSize: 15,
-    color: '#1E293B',
-    fontWeight: '500'
+    fontSize: 15, 
+    color: '#1E293B', 
+    fontWeight: '500' 
   },
   selector: { 
     flexDirection: 'row', 
@@ -285,43 +335,23 @@ const styles = StyleSheet.create({
     borderWidth: 1, 
     borderColor: '#E2E8F0' 
   },
-  
   saveBtn: { 
     backgroundColor: '#10B981', 
     padding: 18, 
     borderRadius: 18, 
     alignItems: 'center', 
-    marginTop: 35,
-    elevation: 6,
-    shadowColor: '#10B981',
+    marginTop: 35, 
+    elevation: 6, 
+    shadowColor: '#10B981', 
     shadowOpacity: 0.3,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 }
   },
-  saveText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 1 },
-  
-  // Modal Styles
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, height: '85%', overflow: 'hidden' },
-  modalHeader: { flexDirection: 'row', padding: 20, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  searchBarContainer: { 
-    flex: 1, 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#F1F5F9', 
-    paddingHorizontal: 15, 
-    borderRadius: 14, 
-    marginRight: 15, 
-    height: 50 
-  },
-  modalSearchInput: { flex: 1, marginLeft: 10, fontSize: 16, fontWeight: '500', color: '#1E293B' },
-  itemRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between',
-    padding: 20, 
-    borderBottomWidth: 1, 
-    borderBottomColor: '#F8FAFC' 
-  },
+  saveText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 24, height: '80%', overflow: 'hidden' },
+  modalHeader: { flexDirection: 'row', padding: 15, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  modalSearchInput: { flex: 1, backgroundColor: '#F1F5F9', padding: 12, borderRadius: 12, marginRight: 10, fontSize: 16, color: '#1E293B' },
+  itemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#F8FAFC' },
   itemText: { fontSize: 16, color: '#1E293B', fontWeight: '600' }
 });

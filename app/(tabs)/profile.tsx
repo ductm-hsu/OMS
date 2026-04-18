@@ -13,10 +13,10 @@ import {
   Platform,
   KeyboardAvoidingView
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// Đảm bảo tệp supabase.js tồn tại trong thư mục src/utils/
+// Đảm bảo tệp supabase.js tồn tại trong thư mục src/utils/ của dự án bạn
 import { supabase } from '../../src/utils/supabase';
 
 interface UserProfile {
@@ -28,8 +28,11 @@ interface UserProfile {
 }
 
 /**
- * Màn hình Profile (app/(tabs)/profile.tsx)
- * Quản lý thông tin cá nhân, định tuyến tính năng và đổi mật khẩu
+ * MÀN HÌNH TÀI KHOẢN (app/(tabs)/profile.tsx)
+ * Đã cập nhật phân quyền hiển thị menu:
+ * - Manager: Quản lý User, Đối soát, Cấu hình. (Ẩn Kho hàng & Ví)
+ * - Customer: Kho lấy hàng, Ví. (Ẩn menu Quản trị)
+ * - Tất cả: Đổi mật khẩu, Đăng xuất.
  */
 export default function App() {
   const router = useRouter();
@@ -67,6 +70,8 @@ export default function App() {
           setProfile(data);
           setEditName(data.full_name || '');
           setEditPhone(data.phone_number || '');
+          // Đồng bộ role vào bộ nhớ tạm
+          await AsyncStorage.setItem('userRole', data.role || 'customer');
         }
       }
     } catch (error: any) {
@@ -116,7 +121,7 @@ export default function App() {
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
       
-      Alert.alert('Thành công', 'Mật khẩu đã được thay đổi thành công.');
+      Alert.alert('Thành công', 'Mật khẩu đã được thay đổi.');
       setIsPasswordModalVisible(false);
       setNewPassword('');
       setConfirmPassword('');
@@ -149,21 +154,21 @@ export default function App() {
   }
 
   const role = profile?.role;
-  const isShipper = role === 'shipper';
   const isManager = role === 'manager';
+  const isCustomer = role === 'customer';
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}><Text style={styles.headerTitle}>Cá Nhân</Text></View>
+      <View style={styles.header}><Text style={styles.headerTitle}>Hồ sơ cá nhân</Text></View>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* Card thông tin cơ bản */}
+        {/* Card thông tin người dùng */}
         <View style={styles.userCard}>
-          <View style={styles.avatar}>
+          <View style={[styles.avatar, isManager && { backgroundColor: '#1E40AF' }]}>
             <Ionicons name={isManager ? "shield-checkmark" : "person"} size={32} color="#fff" />
           </View>
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>{profile?.full_name || 'Hội viên OMS'}</Text>
+            <Text style={styles.userName}>{profile?.full_name || 'Thành viên OMS'}</Text>
             <Text style={styles.userEmail}>{profile?.email}</Text>
             <View style={[styles.roleBadge, isManager && { backgroundColor: '#FEE2E2' }]}>
               <Text style={[styles.roleText, isManager && { color: '#B91C1C' }]}>
@@ -176,12 +181,11 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* DỊCH VỤ KHÁCH HÀNG */}
-        {!isShipper && (
+        {/* DỊCH VỤ KHÁCH HÀNG (Chỉ dành cho Customer) */}
+        {isCustomer && (
           <View style={styles.menuGroup}>
             <Text style={styles.menuGroupTitle}>DỊCH VỤ KHÁCH HÀNG</Text>
             
-            {/* FIX ĐỊNH TUYẾN: Trỏ vào manager.tsx trong folder addresses */}
             <TouchableOpacity 
               style={styles.menuItem} 
               onPress={() => router.push('/addresses/manager' as any)}
@@ -207,23 +211,53 @@ export default function App() {
           </View>
         )}
 
-        {/* QUẢN TRỊ HỆ THỐNG (Chỉ cho Manager) */}
+        {/* QUẢN TRỊ HỆ THỐNG (Dành riêng cho Manager) */}
         {isManager && (
           <View style={styles.menuGroup}>
             <Text style={styles.menuGroupTitle}>QUẢN TRỊ HỆ THỐNG</Text>
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/manager/config' as any)}>
+            
+            <TouchableOpacity 
+              style={styles.menuItem} 
+              onPress={() => router.push('/manager/users' as any)}
+            >
+              <View style={styles.menuItemLeft}>
+                <View style={[styles.iconBox, { backgroundColor: '#FDF2F8' }]}>
+                  <Ionicons name="people" size={20} color="#BE185D" />
+                </View>
+                <Text style={styles.menuItemText}>Quản lý Thành viên</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.menuItem} 
+              onPress={() => router.push('/manager/reconciliation' as any)}
+            >
+              <View style={styles.menuItemLeft}>
+                <View style={[styles.iconBox, { backgroundColor: '#FFF7ED' }]}>
+                  <MaterialCommunityIcons name="cash-register" size={20} color="#C2410C" />
+                </View>
+                <Text style={styles.menuItemText}>Đối soát tài chính</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.menuItem} 
+              onPress={() => router.push('/manager/config' as any)}
+            >
               <View style={styles.menuItemLeft}>
                 <View style={[styles.iconBox, { backgroundColor: '#F1F5F9' }]}>
-                  <Ionicons name="settings-outline" size={20} color="#475569" />
+                  <Ionicons name="settings" size={20} color="#475569" />
                 </View>
-                <Text style={styles.menuItemText}>Cấu hình biểu phí & Phân vùng</Text>
+                <Text style={styles.menuItemText}>Cấu hình biểu phí</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
             </TouchableOpacity>
           </View>
         )}
 
-        {/* BẢO MẬT & HỆ THỐNG */}
+        {/* HỆ THỐNG & BẢO MẬT (Dành cho tất cả) */}
         <View style={styles.menuGroup}>
           <Text style={styles.menuGroupTitle}>HỆ THỐNG & BẢO MẬT</Text>
           <TouchableOpacity style={styles.menuItem} onPress={() => setIsPasswordModalVisible(true)}>
@@ -246,7 +280,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.versionLabel}>OMS Phiên bản 1.1.0 • {isManager ? 'Admin Mode' : 'User Mode'}</Text>
+        <Text style={styles.versionLabel}>OMS Phiên bản 1.2.0 • {isManager ? 'Admin Mode' : 'User Mode'}</Text>
       </ScrollView>
 
       {/* Modal chỉnh sửa thông tin Profile */}
@@ -303,7 +337,7 @@ export default function App() {
               value={confirmPassword} 
               onChangeText={setConfirmPassword} 
               secureTextEntry 
-              placeholder="Nhập lại mật khẩu mới" 
+              placeholder="Nhập lại mật khẩu" 
               placeholderTextColor="#94A3B8"
             />
             
@@ -335,7 +369,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
   scrollContent: { padding: 20 },
   userCard: { flexDirection: 'row', backgroundColor: '#fff', padding: 20, borderRadius: 24, alignItems: 'center', marginBottom: 24, elevation: 4, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10 },
-  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#1E40AF', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#4F46E5', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
   userInfo: { flex: 1 },
   userName: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
   userEmail: { fontSize: 12, color: '#6B7280', marginTop: 2 },

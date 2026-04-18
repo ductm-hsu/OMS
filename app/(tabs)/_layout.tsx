@@ -1,15 +1,18 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons'; 
-import { useEffect, useState } from 'react';
-// Sửa lỗi import AsyncStorage và đảm bảo tương thích với môi trường mobile
+import React, { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, ActivityIndicator } from 'react-native';
 
 /**
  * Layout chính của hệ thống Tab (app/(tabs)/_layout.tsx)
- * Quản lý phân quyền hiển thị Tab cho 3 vai trò: Customer, Shipper, Manager
+ * - Quản lý hiển thị các Tab dựa trên vai trò người dùng (Manager, Shipper, Customer).
+ * - Đã cập nhật: Chỉ cho phép 'customer' xem tab Thông báo.
+ * - Đã thêm trạng thái chờ (Loading) để tránh việc hiển thị sai tab trước khi lấy được Role.
  */
-export default function TabLayout() {
+export default function App() {
   const [role, setRole] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchRole = async () => {
@@ -17,14 +20,28 @@ export default function TabLayout() {
         const storedRole = await AsyncStorage.getItem('userRole');
         setRole(storedRole);
       } catch (e) {
-        console.error('Lỗi lấy role từ bộ nhớ:', e);
+        console.error('Lỗi lấy vai trò người dùng:', e);
+      } finally {
+        setIsLoading(false);
       }
     };
     fetchRole();
   }, []);
 
+  // Xác định các điều kiện hiển thị dựa trên Role
   const isShipper = role === 'shipper';
   const isManager = role === 'manager';
+  // Chỉ tính là Customer nếu role thực sự là 'customer' (để tránh hiển thị nhầm khi role chưa load xong)
+  const isCustomer = role === 'customer';
+
+  // Hiển thị màn hình chờ trong khi xác định quyền truy cập
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
+        <ActivityIndicator size="large" color="#1E40AF" />
+      </View>
+    );
+  }
 
   return (
     <Tabs 
@@ -36,7 +53,8 @@ export default function TabLayout() {
           paddingBottom: 5, 
           height: 65,
           borderTopWidth: 1,
-          borderTopColor: '#F1F5F9'
+          borderTopColor: '#F1F5F9',
+          backgroundColor: '#FFFFFF'
         },
         tabBarLabelStyle: {
           fontSize: 10,
@@ -46,11 +64,12 @@ export default function TabLayout() {
         }
       }}
     >
-      {/* 1. TRANG CHỦ (Dành cho Khách hàng & Manager) */}
+      {/* 1. TRANG CHỦ (Dashboard cho Customer và Manager) */}
       <Tabs.Screen
         name="home"
         options={{
           title: isManager ? 'Thống Kê' : 'Trang Chủ',
+          // Ẩn tab này đối với Shipper
           href: isShipper ? null : '/home', 
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'grid' : 'grid-outline'} size={22} color={color} />
@@ -58,7 +77,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 2. TRANG CHỦ SHIPPER (Chỉ hiển thị cho Shipper) */}
+      {/* 2. TRANG CHỦ SHIPPER (Chỉ dành cho Shipper) */}
       <Tabs.Screen
         name="shipper-home"
         options={{
@@ -70,7 +89,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 3. VẬN HÀNH (Chỉ hiển thị cho Shipper) */}
+      {/* 3. VẬN HÀNH SHIPPER (Công việc của Shipper) */}
       <Tabs.Screen
         name="shipper-tasks"
         options={{
@@ -82,8 +101,7 @@ export default function TabLayout() {
         }}
       />
       
-      {/* 4. ĐƠN HÀNG (Hiển thị cho Khách và Manager) */}
-      {/* Đối với Manager, tab này sẽ đổi tên thành "Hệ Thống" để quản lý toàn bộ đơn */}
+      {/* 4. ĐƠN HÀNG (Quản lý đơn cho Customer/Manager) */}
       <Tabs.Screen
         name="orders"
         options={{
@@ -95,7 +113,20 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 5. TÀI KHOẢN (Hiển thị cho tất cả các vai trò) */}
+      {/* 5. THÔNG BÁO (Logic: Chỉ dành cho Customer mới được thấy) */}
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: 'Thông Báo',
+          // Sử dụng href: null để ẩn tab hoàn toàn khỏi Tab Bar
+          href: isCustomer ? '/notifications' : null,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+
+      {/* 6. TÀI KHOẢN (Hồ sơ, Đổi mật khẩu, Quản lý kho) */}
       <Tabs.Screen
         name="profile"
         options={{
@@ -106,7 +137,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Vô hiệu hóa route index mặc định để tránh nhầm lẫn */}
+      {/* Ẩn các route bổ trợ hoặc route mặc định khỏi thanh Tab */}
       <Tabs.Screen name="index" options={{ href: null }} />
     </Tabs>
   );
