@@ -13,8 +13,9 @@ import {
   Modal,
   Dimensions
 } from 'react-native';
-// Sử dụng SafeAreaView chuẩn để tối ưu hiển thị trên các thiết bị di động hiện đại
+// Sử dụng SafeAreaView từ thư viện context để tránh warning deprecated và tối ưu hiển thị
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+// Thư viện Icon chuẩn cho môi trường di động Expo
 import { 
   Package, 
   ChevronRight, 
@@ -32,26 +33,27 @@ import {
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// Lưu ý: Đảm bảo đường dẫn này khớp với cấu trúc thư mục của bạn
+// Đường dẫn cấu hình Supabase thực tế trong dự án của bạn
 import { supabase } from '../../src/utils/supabase';
 
 const { width } = Dimensions.get('window');
 
 /**
- * MÀN HÌNH QUẢN LÝ ĐƠN HÀNG (DÀNH CHO MANAGER & CUSTOMER)
- * - Khắc phục lỗi: Bổ sung style 'cardBody' bị thiếu.
- * - Khắc phục lỗi: Trả về null thay vì false trong ListEmptyComponent.
- * - Tính năng: Hủy/Xóa đơn hàng PENDING cho Khách hàng.
+ * MÀN HÌNH QUẢN LÝ ĐƠN HÀNG (OMS)
+ * - Khắc phục lỗi: Bổ sung style 'cardBody' bị thiếu trong StyleSheet.
+ * - Khắc phục lỗi: ListEmptyComponent trả về null thay vì false để khớp kiểu dữ liệu.
+ * - Tính năng: Khách hàng có thể Hủy/Xóa đơn hàng khi ở trạng thái PENDING.
  */
-export default function App() {
+export default function OrdersScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   
-  // States cho Tìm kiếm & Bộ lọc
+  // Trạng thái tìm kiếm và bộ lọc
   const [searchQuery, setSearchQuery] = useState('');
   const [userRole, setUserRole] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export default function App() {
     { label: 'Đã hủy đơn', value: 'CANCELLED', color: '#DC2626' },
   ];
 
-  // 1. Hàm tải dữ liệu thực tế từ Supabase
+  // 1. Tải danh sách đơn hàng thực tế từ Supabase
   const fetchOrders = useCallback(async () => {
     try {
       if (!refreshing) setLoading(true);
@@ -85,11 +87,11 @@ export default function App() {
           shop:user_id (full_name)
         `);
 
+      // Phân quyền: Manager xem toàn bộ, Customer xem đơn cá nhân
       if (role !== 'manager') {
-        // Customer: Xem đơn của riêng mình
         query = query.eq('user_id', authData.user.id);
       } else {
-        // Manager: Xem toàn bộ dữ liệu (mặc định 7 ngày gần nhất)
+        // Manager xem dữ liệu hệ thống (mặc định 7 ngày gần nhất)
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         query = query.gte('created_at', sevenDaysAgo.toISOString());
@@ -100,7 +102,7 @@ export default function App() {
       if (error) throw error;
       setOrders(data || []);
     } catch (error: any) {
-      console.error('Lỗi tải đơn hàng:', error.message);
+      console.error('Lỗi tải dữ liệu đơn hàng:', error.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -111,7 +113,7 @@ export default function App() {
     fetchOrders();
   }, [fetchOrders]);
 
-  // 2. LOGIC BỘ LỌC ĐỒNG BỘ
+  // 2. Logic bộ lọc đồng bộ (useMemo giúp tối ưu hiệu năng render)
   const filteredData = useMemo(() => {
     return orders.filter(item => {
       const matchesStatus = statusFilter === 'ALL' || item.delivery_status === statusFilter;
@@ -127,7 +129,7 @@ export default function App() {
 
   // 3. Xử lý Hủy đơn hàng (Chuyển trạng thái sang CANCELLED)
   const handleCancelOrder = (orderId: string) => {
-    Alert.alert('Hủy đơn hàng', 'Bạn chắc chắn muốn hủy đơn hàng này?', [
+    Alert.alert('Xác nhận hủy', 'Bạn muốn hủy đơn hàng này? Thao tác này không thể hoàn tác.', [
       { text: 'Quay lại', style: 'cancel' },
       { text: 'Xác nhận Hủy', style: 'destructive', onPress: async () => {
         try {
@@ -140,16 +142,17 @@ export default function App() {
 
           if (error) throw error;
 
+          // Ghi log hành trình hủy đơn
           await supabase.from('tb_order_tracking').insert([{ 
             order_id: orderId, 
             status: 'CANCELLED', 
-            note: 'Khách hàng chủ động hủy đơn.', 
+            note: 'Khách hàng chủ động hủy đơn từ ứng dụng.', 
             updated_by: currentUserId 
           }]);
 
           fetchOrders();
         } catch (e) { 
-          Alert.alert('Lỗi', 'Không thể hủy đơn vào lúc này.'); 
+          Alert.alert('Lỗi', 'Không thể hủy đơn. Có thể đơn đã được xử lý bởi bưu tá.'); 
         } finally { 
           setProcessingId(null); 
         }
@@ -157,11 +160,11 @@ export default function App() {
     ]);
   };
 
-  // 4. Xử lý Xóa đơn hàng (Xóa khỏi DB)
+  // 4. Xử lý Xóa đơn hàng (Loại bỏ khỏi hệ thống)
   const handleDeleteOrder = (orderId: string) => {
-    Alert.alert('Xác nhận xóa', 'Đơn hàng sẽ bị xóa vĩnh viễn khỏi hệ thống.', [
+    Alert.alert('Xóa vĩnh viễn', 'Bạn chắc chắn muốn xóa đơn hàng này khỏi danh sách?', [
       { text: 'Hủy', style: 'cancel' },
-      { text: 'Đồng ý xóa', style: 'destructive', onPress: async () => {
+      { text: 'Xóa vĩnh viễn', style: 'destructive', onPress: async () => {
         try {
           setProcessingId(orderId);
           const { error } = await supabase
@@ -172,8 +175,9 @@ export default function App() {
 
           if (error) throw error;
           setOrders(prev => prev.filter(o => o.id !== orderId));
+          Alert.alert('Thành công', 'Đã xóa đơn hàng.');
         } catch (e) { 
-          Alert.alert('Lỗi', 'Không thể xóa đơn hàng.'); 
+          Alert.alert('Lỗi', 'Không thể xóa đơn hàng vào lúc này.'); 
         } finally { 
           setProcessingId(null); 
         }
@@ -212,6 +216,7 @@ export default function App() {
               <Text style={[styles.statusLabel, { color: status.color }]}>{status.label}</Text>
             </View>
           </View>
+          
           <View style={styles.cardBody}>
             <Text style={styles.customerName}>{item.receiver_name}</Text>
             <Text style={styles.addressText} numberOfLines={1}>{item.receiver_address_detail}</Text>
@@ -222,6 +227,7 @@ export default function App() {
               </View>
             )}
           </View>
+          
           <View style={styles.cardFooter}>
             <View style={styles.timeGroup}>
               <Clock size={12} color="#94A3B8" />
@@ -235,11 +241,12 @@ export default function App() {
           <ChevronRight size={16} color="#D1D5DB" style={styles.chevron} />
         </TouchableOpacity>
 
+        {/* Nút hành động nhanh cho Khách hàng */}
         {isCustomer && (isPending || isCancelled) && (
           <View style={styles.actionRow}>
             {isPending && (
               <TouchableOpacity 
-                style={[styles.actionBtn, styles.cancelBtn]} 
+                style={[styles.actionBtn, styles.cancelBtnOutline]} 
                 onPress={() => handleCancelOrder(item.id)}
                 disabled={processingId === item.id}
               >
@@ -248,7 +255,7 @@ export default function App() {
               </TouchableOpacity>
             )}
             <TouchableOpacity 
-              style={[styles.actionBtn, styles.deleteBtn]} 
+              style={[styles.actionBtn, styles.deleteBtnOutline]} 
               onPress={() => handleDeleteOrder(item.id)}
               disabled={processingId === item.id}
             >
@@ -263,7 +270,8 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <SafeAreaView style={styles.safeArea}>
+      {/* Header màn hình */}
       <View style={styles.header}>
         <View>
           <Text style={styles.headerSubText}>{userRole === 'manager' ? 'HỆ THỐNG TỔNG' : 'ĐƠN CỦA TÔI'}</Text>
@@ -274,12 +282,13 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {/* Thanh tìm kiếm và bộ lọc */}
       <View style={styles.searchSection}>
         <View style={styles.searchContainer}>
           <Search size={18} color="#94A3B8" />
           <TextInput 
             style={styles.searchInput} 
-            placeholder="Tìm mã đơn, tên khách, shop..." 
+            placeholder="Tìm mã đơn, khách, shop..." 
             value={searchQuery} 
             onChangeText={setSearchQuery} 
             placeholderTextColor="#94A3B8"
@@ -305,6 +314,7 @@ export default function App() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listPadding}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchOrders()} colors={['#4F46E5']} />}
+        // SỬA LỖI: Trả về null khi loading để không báo lỗi Type definition
         ListEmptyComponent={!loading ? (
           <View style={styles.emptyContainer}>
             <Package size={64} color="#E2E8F0" />
@@ -313,6 +323,7 @@ export default function App() {
         ) : null}
       />
 
+      {/* Modal lọc trạng thái */}
       <Modal visible={isFilterModalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -323,7 +334,10 @@ export default function App() {
             {STATUS_OPTIONS.map((option) => (
               <TouchableOpacity 
                 key={option.value} 
-                style={[styles.filterOption, statusFilter === option.value && { borderColor: option.color, backgroundColor: option.color + '10' }]} 
+                style={[
+                  styles.filterOption, 
+                  statusFilter === option.value && { borderColor: option.color, backgroundColor: option.color + '10' }
+                ]} 
                 onPress={() => { setStatusFilter(option.value); setFilterModalVisible(false); }}
               >
                 <Text style={[styles.filterOptionText, statusFilter === option.value && { color: option.color }]}>{option.label}</Text>
@@ -337,6 +351,7 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* FAB tạo đơn (Chỉ cho Khách hàng) */}
       {userRole !== 'manager' && (
         <TouchableOpacity style={styles.fab} onPress={() => router.push('/create-order' as any)}>
           <Plus size={30} color="#fff" />
@@ -366,7 +381,7 @@ const styles = StyleSheet.create({
   statusTag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
   statusLabel: { fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
   
-  // FIX: Đã thêm style cardBody bị thiếu
+  // SỬA LỖI: Thuộc tính cardBody đã được bổ sung ở đây
   cardBody: { marginBottom: 12 },
   
   customerName: { fontSize: 17, fontWeight: '800', color: '#1E293B' },
@@ -382,8 +397,8 @@ const styles = StyleSheet.create({
   chevron: { position: 'absolute', right: 12, top: '40%' },
   actionRow: { flexDirection: 'row', marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#F1F5F9', gap: 12 },
   actionBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
-  cancelBtn: { borderColor: '#FEF3C7', backgroundColor: '#FFFBEB' },
-  deleteBtn: { borderColor: '#FEE2E2', backgroundColor: '#FEF2F2' },
+  cancelBtnOutline: { borderColor: '#FEF3C7', backgroundColor: '#FFFBEB' },
+  deleteBtnOutline: { borderColor: '#FEE2E2', backgroundColor: '#FEF2F2' },
   actionBtnText: { fontSize: 12, fontWeight: '800', marginLeft: 6 },
   emptyContainer: { alignItems: 'center', marginTop: 100, paddingHorizontal: 40 },
   emptyText: { marginTop: 15, color: '#94A3B8', fontSize: 15, fontWeight: '600', textAlign: 'center' },

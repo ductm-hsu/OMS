@@ -10,12 +10,13 @@ import {
   TextInput,
   Modal,
   SafeAreaView,
-  Platform
+  Platform,
+  KeyboardAvoidingView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// Đảm bảo tệp supabase.js tồn tại trong src/utils/
+// Đảm bảo tệp supabase.js tồn tại trong thư mục src/utils/
 import { supabase } from '../../src/utils/supabase';
 
 interface UserProfile {
@@ -28,8 +29,7 @@ interface UserProfile {
 
 /**
  * Màn hình Profile (app/(tabs)/profile.tsx)
- * Quản lý thông tin cá nhân và phân quyền các lối tắt tính năng
- * Đặc biệt hỗ trợ các lối tắt quản trị dành cho role 'manager'
+ * Quản lý thông tin cá nhân, định tuyến tính năng và đổi mật khẩu
  */
 export default function App() {
   const router = useRouter();
@@ -37,9 +37,15 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
+  // States cho chỉnh sửa Profile
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+
+  // States cho đổi mật khẩu
+  const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => {
     fetchUserProfile();
@@ -95,6 +101,32 @@ export default function App() {
     }
   };
 
+  const handleChangePassword = async () => {
+    if (newPassword.length < 6) {
+      Alert.alert('Lỗi', 'Mật khẩu mới phải có ít nhất 6 ký tự.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Lỗi', 'Mật khẩu xác nhận không khớp.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      
+      Alert.alert('Thành công', 'Mật khẩu đã được thay đổi thành công.');
+      setIsPasswordModalVisible(false);
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (error: any) {
+      Alert.alert('Lỗi', error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleLogout = async () => {
     Alert.alert('Đăng xuất', 'Xác nhận thoát hệ thống?', [
       { text: 'Hủy', style: 'cancel' },
@@ -144,64 +176,16 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* PHẦN DÀNH CHO MANAGER (QUẢN TRỊ VIÊN) */}
-        {isManager && (
-          <View style={styles.menuGroup}>
-            <Text style={styles.menuGroupTitle}>QUẢN TRỊ HỆ THỐNG</Text>
-            
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/manager/users' as any)}>
-              <View style={styles.menuItemLeft}>
-                <View style={[styles.iconBox, { backgroundColor: '#FDF2F8' }]}>
-                  <Ionicons name="people" size={20} color="#BE185D" />
-                </View>
-                <Text style={styles.menuItemText}>Quản lý Người dùng & Shipper</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/manager/reconciliation' as any)}>
-              <View style={styles.menuItemLeft}>
-                <View style={[styles.iconBox, { backgroundColor: '#ECFDF5' }]}>
-                  <Ionicons name="cash" size={20} color="#059669" />
-                </View>
-                <Text style={styles.menuItemText}>Đối soát tiền COD & Công nợ</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/manager/config' as any)}>
-              <View style={styles.menuItemLeft}>
-                <View style={[styles.iconBox, { backgroundColor: '#F1F5F9' }]}>
-                  <Ionicons name="settings-outline" size={20} color="#475569" />
-                </View>
-                <Text style={styles.menuItemText}>Cấu hình khu vực & Phí ship</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* PHẦN DÀNH CHO SHIPPER */}
-        {isShipper && (
-          <View style={styles.menuGroup}>
-            <Text style={styles.menuGroupTitle}>VẬN HÀNH SHIPPER</Text>
-            <TouchableOpacity style={styles.menuItem}>
-              <View style={styles.menuItemLeft}>
-                <View style={[styles.iconBox, { backgroundColor: '#FFF7ED' }]}>
-                  <Ionicons name="time" size={20} color="#C2410C" />
-                </View>
-                <Text style={styles.menuItemText}>Lịch sử ca làm việc</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* PHẦN DÀNH CHO CUSTOMER (KHÔNG PHẢI SHIPPER/MANAGER) */}
-        {!isShipper && !isManager && (
+        {/* DỊCH VỤ KHÁCH HÀNG */}
+        {!isShipper && (
           <View style={styles.menuGroup}>
             <Text style={styles.menuGroupTitle}>DỊCH VỤ KHÁCH HÀNG</Text>
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/address-manager' as any)}>
+            
+            {/* FIX ĐỊNH TUYẾN: Trỏ vào manager.tsx trong folder addresses */}
+            <TouchableOpacity 
+              style={styles.menuItem} 
+              onPress={() => router.push('/addresses/manager' as any)}
+            >
               <View style={styles.menuItemLeft}>
                 <View style={[styles.iconBox, { backgroundColor: '#EFF6FF' }]}>
                   <Ionicons name="business" size={20} color="#1E40AF" />
@@ -223,8 +207,35 @@ export default function App() {
           </View>
         )}
 
+        {/* QUẢN TRỊ HỆ THỐNG (Chỉ cho Manager) */}
+        {isManager && (
+          <View style={styles.menuGroup}>
+            <Text style={styles.menuGroupTitle}>QUẢN TRỊ HỆ THỐNG</Text>
+            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/manager/config' as any)}>
+              <View style={styles.menuItemLeft}>
+                <View style={[styles.iconBox, { backgroundColor: '#F1F5F9' }]}>
+                  <Ionicons name="settings-outline" size={20} color="#475569" />
+                </View>
+                <Text style={styles.menuItemText}>Cấu hình biểu phí & Phân vùng</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* BẢO MẬT & HỆ THỐNG */}
         <View style={styles.menuGroup}>
-          <Text style={styles.menuGroupTitle}>HỆ THỐNG</Text>
+          <Text style={styles.menuGroupTitle}>HỆ THỐNG & BẢO MẬT</Text>
+          <TouchableOpacity style={styles.menuItem} onPress={() => setIsPasswordModalVisible(true)}>
+            <View style={styles.menuItemLeft}>
+              <View style={[styles.iconBox, { backgroundColor: '#FEF9C3' }]}>
+                <Ionicons name="lock-closed-outline" size={20} color="#A16207" />
+              </View>
+              <Text style={styles.menuItemText}>Đổi mật khẩu</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#CBD5E0" />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
             <View style={styles.menuItemLeft}>
               <View style={[styles.iconBox, { backgroundColor: '#FEF2F2' }]}>
@@ -235,10 +246,10 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.versionLabel}>OMS Phiên bản 1.1.0 • Chế độ {isManager ? 'Quản trị' : 'Thành viên'}</Text>
+        <Text style={styles.versionLabel}>OMS Phiên bản 1.1.0 • {isManager ? 'Admin Mode' : 'User Mode'}</Text>
       </ScrollView>
 
-      {/* Modal chỉnh sửa thông tin */}
+      {/* Modal chỉnh sửa thông tin Profile */}
       <Modal visible={isEditModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -250,33 +261,61 @@ export default function App() {
             </View>
             
             <Text style={styles.inputLabel}>Họ và tên</Text>
-            <TextInput 
-              style={styles.input} 
-              value={editName} 
-              onChangeText={setEditName} 
-              placeholder="Họ tên đầy đủ"
-              placeholderTextColor="#94A3B8"
-            />
+            <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Họ tên đầy đủ" placeholderTextColor="#94A3B8" />
             
             <Text style={styles.inputLabel}>Số điện thoại</Text>
-            <TextInput 
-              style={styles.input} 
-              value={editPhone} 
-              onChangeText={setEditPhone} 
-              placeholder="Số điện thoại liên hệ" 
-              keyboardType="phone-pad" 
-              placeholderTextColor="#94A3B8"
-            />
+            <TextInput style={styles.input} value={editPhone} onChangeText={setEditPhone} keyboardType="phone-pad" placeholder="Số điện thoại liên hệ" placeholderTextColor="#94A3B8" />
             
-            <TouchableOpacity 
-              style={[styles.saveButton, saving && { opacity: 0.6 }]} 
-              onPress={handleUpdateProfile} 
-              disabled={saving}
-            >
+            <TouchableOpacity style={styles.saveButton} onPress={handleUpdateProfile} disabled={saving}>
               {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Lưu thay đổi</Text>}
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* Modal đổi mật khẩu */}
+      <Modal visible={isPasswordModalVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Đổi mật khẩu mới</Text>
+              <TouchableOpacity onPress={() => setIsPasswordModalVisible(false)}>
+                <Ionicons name="close" size={28} color="#4B5563" />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.inputLabel}>Mật khẩu mới</Text>
+            <TextInput 
+              style={styles.input} 
+              value={newPassword} 
+              onChangeText={setNewPassword} 
+              secureTextEntry 
+              placeholder="Tối thiểu 6 ký tự" 
+              placeholderTextColor="#94A3B8"
+            />
+            
+            <Text style={styles.inputLabel}>Xác nhận mật khẩu</Text>
+            <TextInput 
+              style={styles.input} 
+              value={confirmPassword} 
+              onChangeText={setConfirmPassword} 
+              secureTextEntry 
+              placeholder="Nhập lại mật khẩu mới" 
+              placeholderTextColor="#94A3B8"
+            />
+            
+            <TouchableOpacity 
+              style={[styles.saveButton, { backgroundColor: '#059669' }]} 
+              onPress={handleChangePassword} 
+              disabled={saving}
+            >
+              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Cập nhật mật khẩu</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -295,19 +334,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
   scrollContent: { padding: 20 },
-  
-  userCard: { 
-    flexDirection: 'row', 
-    backgroundColor: '#fff', 
-    padding: 20, 
-    borderRadius: 24, 
-    alignItems: 'center', 
-    marginBottom: 24, 
-    elevation: 4, 
-    shadowColor: '#000', 
-    shadowOpacity: 0.05, 
-    shadowRadius: 10 
-  },
+  userCard: { flexDirection: 'row', backgroundColor: '#fff', padding: 20, borderRadius: 24, alignItems: 'center', marginBottom: 24, elevation: 4, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10 },
   avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#1E40AF', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
   userInfo: { flex: 1 },
   userName: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
@@ -315,26 +342,13 @@ const styles = StyleSheet.create({
   roleBadge: { backgroundColor: '#EFF6FF', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginTop: 6 },
   roleText: { fontSize: 9, fontWeight: '900', color: '#1E40AF' },
   editBtnCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
-  
   menuGroup: { marginBottom: 24 },
   menuGroupTitle: { fontSize: 11, fontWeight: '800', color: '#9CA3AF', marginBottom: 12, marginLeft: 6, letterSpacing: 0.5 },
-  menuItem: { 
-    flexDirection: 'row', 
-    backgroundColor: '#fff', 
-    padding: 16, 
-    borderRadius: 20, 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    marginBottom: 10, 
-    borderWidth: 1, 
-    borderColor: '#F3F4F6' 
-  },
+  menuItem: { flexDirection: 'row', backgroundColor: '#fff', padding: 16, borderRadius: 20, alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, borderWidth: 1, borderColor: '#F3F4F6' },
   menuItemLeft: { flexDirection: 'row', alignItems: 'center' },
   iconBox: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   menuItemText: { fontSize: 14, color: '#374151', marginLeft: 14, fontWeight: '600' },
-  
   versionLabel: { textAlign: 'center', color: '#9CA3AF', fontSize: 11, marginTop: 10, marginBottom: 40 },
-  
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 24, paddingBottom: 40 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25 },
