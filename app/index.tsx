@@ -12,9 +12,7 @@ import {
   Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
-// Đảm bảo file supabase.js nằm đúng cấu trúc thư mục src/utils/
 import { supabase } from '../src/utils/supabase'; 
-// SỬA LỖI: Import AsyncStorage chuẩn từ gốc thư viện
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
@@ -88,7 +86,7 @@ export default function App() {
       >
         <View style={styles.headerContainer}>
           <Text style={styles.logo}>OMS</Text>
-          <Text style={styles.subtitle}>Hệ thống Điều phối Vận chuyển</Text>
+          <Text style={styles.subtitle}>Hệ thống Quản lý vận đơn</Text>
         </View>
 
         <View style={styles.card}>
@@ -98,7 +96,7 @@ export default function App() {
             <Text style={styles.label}>Email tài khoản</Text>
             <TextInput
               style={styles.input}
-              placeholder="shipper@example.com"
+              placeholder="email@example.com"
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"

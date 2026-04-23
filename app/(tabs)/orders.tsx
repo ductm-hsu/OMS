@@ -301,7 +301,7 @@ export default function App() {
 
       {/* FAB: Tạo đơn mới */}
       {userRole !== 'manager' && (
-        <TouchableOpacity style={styles.fab} onPress={() => router.push('/create-order' as any)}>
+        <TouchableOpacity style={styles.fab} onPress={() => router.push('/orders/create' as any)}>
           <Plus size={30} color="#fff" />
         </TouchableOpacity>
       )}
