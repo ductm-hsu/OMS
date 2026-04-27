@@ -16,23 +16,35 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
 /**
- * Đảm bảo đường dẫn import supabase chính xác:
- * Tệp hiện tại: app/addresses/add.tsx
- * Đường dẫn: nhảy ra 2 cấp (../../) để về gốc, sau đó vào src/utils/supabase
+ * Đảm bảo đường dẫn import supabase chính xác cho dự án của bạn
  */
 import { supabase } from '../../src/utils/supabase';
 
 /**
+ * Hàm hỗ trợ loại bỏ dấu tiếng Việt để tìm kiếm không dấu (Unicode normalization)
+ */
+const removeVietnameseTones = (str: string) => {
+  if (!str) return '';
+  return str
+    .normalize('NFD') // Tách các ký tự dấu ra khỏi chữ cái gốc
+    .replace(/[\u0300-\u036f]/g, '') // Xóa các ký tự dấu
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+};
+
+/**
  * MÀN HÌNH THÊM / SỬA KHO HÀNG (app/addresses/add.tsx)
  * - Tự động phát hiện chế độ "Sửa" nếu có tham số 'id' trong URL.
- * - Sử dụng giao diện Navy hiện đại đồng bộ với hệ thống OMS.
+ * - Hỗ trợ tìm kiếm Tỉnh/Thành, Phường/Xã bỏ qua dấu tiếng Việt.
  */
 export default function App() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  // Lấy ID từ params để xác định chế độ Thêm mới hay Chỉnh sửa
   const id = params?.id;
   const isEditing = !!id;
 
@@ -55,18 +67,16 @@ export default function App() {
   const [modalType, setModalType] = useState<'province' | 'ward'>('province');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Khởi tạo dữ liệu khi màn hình mount
+  // Khởi tạo dữ liệu
   useEffect(() => {
     const initData = async () => {
       await fetchProvinces();
-
       if (id) {
         await fetchCurrentAddress(id.toString());
       } else {
         setFetching(false);
       }
     };
-    
     initData();
   }, [id]);
 
@@ -90,7 +100,6 @@ export default function App() {
     }
   };
 
-  // Tải dữ liệu chi tiết của kho hàng cũ để chỉnh sửa
   const fetchCurrentAddress = async (addressId: string) => {
     try {
       setFetching(true);
@@ -112,8 +121,6 @@ export default function App() {
         if (data.province_id) {
           await fetchWards(data.province_id);
         }
-      } else {
-        Alert.alert("Thông báo", "Không tìm thấy thông tin kho hàng.");
       }
     } catch (e: any) {
       Alert.alert("Lỗi", "Không thể tải dữ liệu kho hàng: " + e.message);
@@ -151,7 +158,6 @@ export default function App() {
       };
 
       if (isEditing && id) {
-        // CẬP NHẬT ĐỊA CHỈ HIỆN TẠI
         const { error } = await supabase
           .from('tb_addresses')
           .update(payload)
@@ -159,14 +165,12 @@ export default function App() {
         if (error) throw error;
         Alert.alert("Thành công", "Đã cập nhật thông tin kho hàng.");
       } else {
-        // THÊM MỚI ĐỊA CHỈ
         const { error } = await supabase
           .from('tb_addresses')
           .insert([payload]);
         if (error) throw error;
         Alert.alert("Thành công", "Đã thêm kho hàng mới.");
       }
-      
       router.back();
     } catch (e: any) {
       Alert.alert('Lỗi', 'Không thể lưu dữ liệu: ' + e.message);
@@ -279,7 +283,11 @@ export default function App() {
               </TouchableOpacity>
             </View>
             <FlatList
-              data={(modalType === 'province' ? provinces : wards).filter(item => (item.name||'').toLowerCase().includes(searchQuery.toLowerCase()))}
+              data={(modalType === 'province' ? provinces : wards).filter(item => {
+                const searchTxt = removeVietnameseTones(searchQuery);
+                const itemName = removeVietnameseTones(item.name || '');
+                return itemName.includes(searchTxt);
+              })}
               keyExtractor={(item) => item.id.toString()}
               renderItem={({ item }) => (
                 <TouchableOpacity 
@@ -343,9 +351,9 @@ const styles = StyleSheet.create({
     marginTop: 35, 
     elevation: 6, 
     shadowColor: '#10B981', 
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 }
+    shadowOpacity: 0.3, 
+    shadowRadius: 10, 
+    shadowOffset: { width: 0, height: 6 } 
   },
   saveText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'center', padding: 20 },
